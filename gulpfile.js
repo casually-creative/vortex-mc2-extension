@@ -41,7 +41,8 @@ const extractInfo = async () =>
             name: `Game: ${packageData["vortex-game"]}`,
             author: packageData.author,
             version: packageData.version,
-            description: packageData.description
+            description: packageData.description,
+            lastUpdated: Date.now()
         }
 
         const infoFile = await fs.writeFile(path.join(__dirname, "dist", "info.json"), JSON.stringify(infoData));

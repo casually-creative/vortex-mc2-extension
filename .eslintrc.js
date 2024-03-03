@@ -123,7 +123,7 @@ module.exports = {
       "warn",
       {
         "code": 500,
-        "comments": 160,
+        "comments": 200,
         "ignoreUrls": true,
         "ignoreStrings": true,
         "ignoreRegExpLiterals": true,

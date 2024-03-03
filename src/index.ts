@@ -1,15 +1,19 @@
-import { /*fs as vortexFs,*/ types, util } from "vortex-api";
 import fs from "fs";
 import path from "path";
-import { IDiscoveryResult } from "vortex-api/lib/types/IState";
-import { IExtensionApi, IInstallResult, IInstruction, ISupportedResult } from "vortex-api/lib/types/IExtensionContext";
+
+import { selectors, util } from "vortex-api";
 import { IDialogResult } from "vortex-api/lib/actions";
+import { IExtensionApi, IExtensionContext, IInstallResult, IInstruction, ISupportedResult } from "vortex-api/lib/types/IExtensionContext";
+import { IDiscoveryResult, IMod } from "vortex-api/lib/types/IState";
+
+import modInstructions, { IFileInstructions } from "./modInstructions";
 
 const VORTEX_ID = 'midnightclub2';
 const STEAMAPP_ID = '12160';
+const RENAME_INSTRUCTIONS_KEY = "file_rename_instructions";
 // cd/iso install -> C:\Games\Midnight Club II
 
-const main = (context: types.IExtensionContext) =>
+const main = (context: IExtensionContext) =>
 {
     context.registerGame(
     {
@@ -33,32 +37,50 @@ const main = (context: types.IExtensionContext) =>
 
     context.registerInstaller(`${VORTEX_ID}-installer`, 25, testSupportedContent, installContent);
 
+    context.once(() =>
+    {      
+        context.api.onStateChange(["persistent", "gameMode", "gameInfo", VORTEX_ID, "path", "value"], (previousPath, currentPath) =>
+        {
+            console.log("onStateChangeCallbackCalled");
+
+            // This hooks into the game location path getting changed, so we can revalidate the new installation directory.
+            if (currentPath === previousPath)
+                return; // Promise.resolve();
+
+            validateInstallationDirectorySync(currentPath, context.api);
+        });
+
+        // sadly this event is internal, not intended to be used by 3rd party devs
+        // context.api.onAsync("manually-set-game-location", async (profileId: string, deployment: IDeploymentManifest) => await handleManuallySetGameLocation(context.api, profileId, deployment));
+
+        context.api.events.on("mods-enabled", (modIds: string[], enabled: boolean, gameId: string) => handleModsEnabled(context.api, modIds, enabled, gameId));
+    });
+
     return true;
 }
 
-const prepareForModding = async (discovery: IDiscoveryResult, contextApi: IExtensionApi) =>
+
+
+const prepareForModding = async (discovery: IDiscoveryResult, vortexApi: IExtensionApi): Promise<void> =>
 {
-    contextApi.onStateChange(["persistent", "gameMode", "gameInfo", VORTEX_ID, "path", "value"], async (previousPath: string, currentPath: string) =>
-    {
-        if (currentPath === previousPath)
-            return Promise.resolve();
+    console.log("prepareForModdingCalled");
 
-        await validateInstallationDirectory(currentPath, contextApi);
-    });
-
-    return await validateInstallationDirectory(discovery.path, contextApi);
+    return await validateInstallationDirectory(discovery.path, vortexApi);
 }
 
-const validateInstallationDirectory = async (installationDirectory: string, contextApi: IExtensionApi) =>
+const validateInstallationDirectory = async (installationDirectory: string, vortexApi: IExtensionApi) =>
 {
+    // We detect whether or not the user has extracted their archive, by the existence of the assets_p.dat file.
+    // Users need to delete this file after extraction to pass this check.
+
     if (!fs.existsSync(path.join(installationDirectory, "assets_p.dat")))
         return Promise.resolve();
 
-    const closedArchiveResult : IDialogResult = await contextApi.showDialog(
+    const closedArchiveResult : IDialogResult = vortexApi.showDialog(
         "error",
         "Opened Archive Required",
         {
-            text: "Your game instance seems to be working with a closed archive. This is the result of a default installation. To be able to mod your instance, you need to extract your assets_p.dat file. It is recommended to use the ar_extract tool to achieve this. For more details, watch the video tutorial linked below. For more help, visit the MC2 Community discord and ask around in our modding sub-community. Alternatively, we also provide a download link for an already opened instance.\n\nIf you have extracted your assets_p.dat file, but this error still shows up, then please delete your assets_p.dat file (or move it out of the root directory)."
+            text: "Enabled mods will not have any effect because your game instance seems to be working with a closed archive.This is the result of a default installation.\n\nTo be able to mod your instance, you need to extract your assets_p.dat file. It is recommended to use the ar_extract tool to achieve this. For more details, watch the video tutorial linked below. For more help, visit the MC2 Community discord and ask around in our modding sub-community. Alternatively, we also provide a download link for an already opened instance.\n\nIf you have extracted your assets_p.dat file, but this error still shows up, then please delete your assets_p.dat file (or move it out of the root directory)."
         },
         [
             { label: "Watch Tutorial" },
@@ -68,23 +90,46 @@ const validateInstallationDirectory = async (installationDirectory: string, cont
     );
         
     if(closedArchiveResult.action == "Watch Tutorial")
-        util.opn("https://www.youtube.com/watch?v=bJniSd6Wk10");
+        util.opn("https://youtu.be/QjQBnekFxpo");
 
     if(closedArchiveResult.action == "Join Discord")
         util.opn("https://discord.gg/midnight-club-2");
         
+    // maybe the extra error notification is overkill?
     return Promise.reject(new util.SetupError("Opened Archive Required"));
 }
 
-const testSupportedContent = (files: string[], gameId: string, archivePath?: string) : Promise<ISupportedResult> =>
+const validateInstallationDirectorySync = (installationDirectory: string, vortexApi: IExtensionApi) =>
 {
-    console.info("testSupportedContent");
-    console.debug(files);
-    console.debug(archivePath);
+    // We detect whether or not the user has extracted their archive, by the existence of the assets_p.dat file.
+    // Users need to delete this file after extraction to pass this check.
 
-    const modIsSupported = 
-        gameId === VORTEX_ID; // &&
-        //files.find(file => file.toLowerCase() === "content\\") !== undefined;
+    if (!fs.existsSync(path.join(installationDirectory, "assets_p.dat")))
+        return;
+
+    const closedArchiveResult : IDialogResult = vortexApi.showDialog(
+        "error",
+        "Opened Archive Required",
+        {
+            text: "Enabled mods will not have any effect because your game instance seems to be working with a closed archive. This is the result of a default installation.\n\nTo be able to mod your instance, you need to extract your assets_p.dat file. It is recommended to use the ar_extract tool to achieve this. For more details, watch the video tutorial linked below. For more help, visit the MC2 Community discord and ask around in our modding sub-community. Alternatively, we also provide a download link for an already opened instance.\n\nIf you have extracted your assets_p.dat file, but this error still shows up, then please delete your assets_p.dat file (or move it out of the root directory)."
+        },
+        [
+            { label: "Watch Tutorial" },
+            { label: "Join Discord" },
+            { label: "Close", default: true }
+        ]
+    );
+        
+    if(closedArchiveResult.action == "Watch Tutorial")
+        util.opn("https://youtu.be/QjQBnekFxpo");
+
+    if(closedArchiveResult.action == "Join Discord")
+        util.opn("https://discord.gg/midnight-club-2");
+}
+
+const testSupportedContent = (files: string[], gameId: string) : Promise<ISupportedResult> =>
+{
+    const modIsSupported = gameId === VORTEX_ID;
 
     return Promise.resolve({
         supported: modIsSupported,
@@ -92,23 +137,21 @@ const testSupportedContent = (files: string[], gameId: string, archivePath?: str
     });
 }
 
-// Todo:
-// Figure out how to support renaming files, like vp_lancer_side-b.tex -> vp_lancer_side-b.bmp
-// Tip: work with a json instruction list to rename files, add attributes to the mod on enable, query for attributes during disable and restore those files
-const installContent = (folderAndFilePaths: string[]): Promise<IInstallResult> =>
+const installContent = (folderAndFilePaths: string[], destinationPath: string): Promise<IInstallResult> =>
 {
-    const contentFolderName = "content\\"; // add _ later
+    console.log("InstallContentCalled");
 
-    const modHasContentFolderInRoot = folderAndFilePaths.map(p => p.toLowerCase()).includes(contentFolderName);
+    const modFilesFolderName = "_modfiles\\";
+    const modHasModFilesFolderInRoot = folderAndFilePaths.map(p => p.toLowerCase()).includes(modFilesFolderName);
 
     // first, filter out all the folder paths, keep only file paths
     let filteredFilePaths = folderAndFilePaths.filter(filePath => !filePath.endsWith(path.sep));
 
     // second, if root folder contains a folder named "content", take only those files
-    if(modHasContentFolderInRoot)
-        filteredFilePaths = filteredFilePaths.filter(filePath => filePath.toLowerCase().startsWith(contentFolderName));
+    if(modHasModFilesFolderInRoot)
+        filteredFilePaths = filteredFilePaths.filter(filePath => filePath.toLowerCase().startsWith(modFilesFolderName));
 
-    const replacePattern = new RegExp(contentFolderName.replaceAll("\\", "\\\\"), "i");
+    const replacePattern = new RegExp(modFilesFolderName.replaceAll("\\", "\\\\"), "i");
 
     const instructions = filteredFilePaths.map(filePathToCopy =>
     {
@@ -119,9 +162,94 @@ const installContent = (folderAndFilePaths: string[]): Promise<IInstallResult> =
         } as IInstruction;
     });
 
+    const renameInstruction = getRenameInstruction(destinationPath);
+
+    if(renameInstruction)
+        instructions.push(renameInstruction);
+
     return Promise.resolve({
         instructions
     });
+}
+
+const getRenameInstruction = (destinationPath: string): IInstruction | undefined =>
+{
+    const instructionsPath = path.join(destinationPath, "_vortex/instructions.json");
+    const instructionsExist = fs.existsSync(instructionsPath);
+
+    if(!instructionsExist)
+        return;
+
+    console.log(`instructionsExist: ${instructionsExist}`);
+
+    // todo: try catch JSON.parse() as IFileInstructions
+    const instructions = fs.readFileSync(instructionsPath, { encoding: "utf8" });
+
+    return {
+        key: RENAME_INSTRUCTIONS_KEY,
+        value: instructions,
+        type: "attribute"
+    };
+}
+
+const handleModsEnabled = (vortexApi: IExtensionApi, modIds: string[], enabled: boolean, gameId: string) =>
+{
+    console.log("ExecutingHandleModsEnabled");
+    console.log(`mod ids: ${JSON.stringify(modIds)}`);
+    console.log(`enabled: ${enabled}`);
+    console.log(`gameId:  ${gameId}`);
+
+    if (gameId !== VORTEX_ID)
+        return;
+
+    try
+    {
+        validateInstallationDirectorySync(getDiscoveryPath(vortexApi), vortexApi);
+
+        modIds.forEach((modId: string) => executeModInstallationInstructions(vortexApi, modId, enabled));
+    }
+    catch(error)
+    {
+        console.error(`CaughtHandleModEnabledError': ${error}`)
+    }
+}
+
+
+const executeModInstallationInstructions = (vortexApi: IExtensionApi, modId: string, enabled: boolean) =>
+{
+    console.log(`ExecutingExecuteModInstallationInstructions for mod with id '${modId}' being ${enabled ? "enabled" : "disabled"}.`);
+
+    const applicationState = vortexApi.getState();
+    const instructionsAttribute = util.getSafe<string>(applicationState, ["persistent", "mods", VORTEX_ID, modId, "attributes", RENAME_INSTRUCTIONS_KEY], null);
+
+    if(!instructionsAttribute)
+    {
+        // console.log(`No file rename instructions found for mod with id '${modId}'.`);
+        return;
+    }
+
+    const instructions = JSON.parse(instructionsAttribute) as IFileInstructions;
+
+    if(!instructions)
+        return;
+
+    modInstructions.executeFileRenames(instructions.rename, getDiscoveryPath(vortexApi), enabled);
+}
+
+const getDiscoveryPath = (vortexApi: IExtensionApi): string | undefined =>
+{
+    const state = vortexApi.getState();
+    const profile = selectors.activeProfile(state);
+
+    if (profile?.gameId !== VORTEX_ID)
+        return;
+
+    const discovery: IDiscoveryResult = selectors.discoveryByGame(state, VORTEX_ID);
+
+    if (!discovery?.path)
+        return;
+
+    return discovery.path;
 }
 
 export default main;
