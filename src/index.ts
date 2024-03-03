@@ -147,7 +147,7 @@ const installContent = (folderAndFilePaths: string[], destinationPath: string): 
     // first, filter out all the folder paths, keep only file paths
     let filteredFilePaths = folderAndFilePaths.filter(filePath => !filePath.endsWith(path.sep));
 
-    // second, if root folder contains a folder named "content", take only those files
+    // second, if root folder contains a folder named "_modFiles", take only those files
     if(modHasModFilesFolderInRoot)
         filteredFilePaths = filteredFilePaths.filter(filePath => filePath.toLowerCase().startsWith(modFilesFolderName));
 
